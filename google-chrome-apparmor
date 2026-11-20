@@ -1,0 +1,430 @@
+abi <abi/5.0>,
+
+include <tunables/global>
+
+profile google-chrome /opt/google/chrome/chrome {
+
+# ===== 1. BASICS =====
+
+# basics every program needs: loader, libraries, locale, /dev/null
+include <abstractions/base>
+
+
+# OS name
+/etc/os-release r,
+
+
+# ===== 2. SANDBOX =====
+
+# create user namespaces for the tab sandbox
+userns,
+
+
+# set up namespaces inside its own user namespace (only works in there)
+capability sys_admin,
+
+
+# tab sandbox: lock tabs into an empty folder (only works in its own namespace)
+capability sys_chroot,
+
+
+# silently block inspecting other processes system-wide
+deny capability sys_ptrace,
+
+
+# sandbox checks /proc before starting (listing only)
+@{PROC}/ r,
+
+
+# set up the sandbox's user namespace
+owner @{PROC}/[0-9]*/setgroups w,
+owner @{PROC}/[0-9]*/uid_map w,
+owner @{PROC}/[0-9]*/gid_map w,
+
+
+# check whether the kernel allows process inspection
+@{PROC}/sys/kernel/yama/ptrace_scope r,
+
+
+# ===== 3. DISPLAY AND KEYBOARD =====
+
+# draw its window through your Wayland display
+owner /run/user/[0-9]*/wayland-0 rw,
+
+
+# keyboard layout definitions (read-only)
+/usr/share/xkeyboard-config-2/ r,
+/usr/share/xkeyboard-config-2/** r,
+
+
+# GNOME settings list, used by its file dialogs (read-only)
+/usr/share/glib-2.0/schemas/gschemas.compiled r,
+
+
+# ===== 4. FONTS (all read-only) =====
+
+# font settings
+/etc/fonts/ r,
+/etc/fonts/** r,
+
+
+# font settings fragments
+/usr/share/fontconfig/ r,
+/usr/share/fontconfig/** r,
+
+
+# font files
+/usr/share/fonts/ r,
+/usr/share/fonts/** r,
+
+
+# system font cache
+/var/cache/fontconfig/ r,
+/var/cache/fontconfig/** r,
+
+
+# your font cache, read-only so Chrome can't change it for other programs
+owner @{HOME}/.cache/fontconfig/ r,
+owner @{HOME}/.cache/fontconfig/** r,
+
+
+# ===== 5. CHROME'S OWN FILES =====
+
+# list and read Chrome's install folder
+/opt/google/chrome/ r,
+/opt/google/chrome/** r,
+
+
+# silently block writes into Chrome's install folder
+deny /opt/google/chrome/** w,
+
+
+# load Chrome's main program, and let it restart itself for tabs/helpers
+/opt/google/chrome/chrome mrix,
+
+
+# load Chrome's own libraries
+/opt/google/chrome/*.so mr,
+
+
+# Widevine: Google's closed-source DRM for Netflix, Spotify etc.
+/opt/google/chrome/WidevineCdm/**.so mr,
+
+
+# Chrome policy files (you can use these to switch off Google features)
+/etc/opt/chrome/policies/ r,
+/etc/opt/chrome/policies/** r,
+
+
+# Chrome's profile folder: settings, history, crash settings
+owner @{HOME}/.config/google-chrome/ rw,
+owner @{HOME}/.config/google-chrome/** rwk,
+
+
+# silently block the usage-statistics files Chrome collects for Google
+deny owner @{HOME}/.config/google-chrome/BrowserMetrics/** rw,
+
+
+# Chrome's own disk cache in your home
+owner @{HOME}/.cache/google-chrome/ rw,
+owner @{HOME}/.cache/google-chrome/** rwk,
+
+
+# Chrome's own temporary folders (names start with com.google.Chrome)
+owner /tmp/com.google.Chrome.*/ rw,
+owner /tmp/com.google.Chrome.*/** rwk,
+
+
+# Chrome's hidden shared-memory files in /tmp (shared folder, but only Chrome-named files)
+
+owner /tmp/.com.google.Chrome.* rw,
+
+
+# Chrome's only download and upload folder: list it
+
+owner @{HOME}/Downloads/google-chrome/ r,
+
+
+# read and write files inside it only (no running them)
+
+owner @{HOME}/Downloads/google-chrome/** rw,
+
+
+# list file names in Downloads (needed by the file picker to reach google-chrome/, can't open them)
+
+owner @{HOME}/Downloads/ r,
+
+
+# ===== 6. NETWORK =====
+
+
+# web traffic over IPv4: TCP for pages, UDP for DNS and QUIC (broad by nature for a browser)
+network inet stream,
+network inet dgram,
+
+
+# DNS settings (read-only system files)
+/etc/resolv.conf r,
+/etc/nsswitch.conf r,
+/etc/hosts r,
+/etc/host.conf r,
+
+
+# silently block netlink: network-change and device-change notices (test: allow if pages say offline)
+deny network netlink raw,
+
+
+# ===== 7. AUDIO =====
+
+# sound client settings (read-only system file)
+/etc/pulse/client.conf r,
+
+
+# find your sound server's folder
+owner /run/user/[0-9]*/pulse/ r,
+
+
+# connect to your sound server (shared socket: allows playback AND microphone)
+owner /run/user/[0-9]*/pulse/native rw,
+
+
+# silently block the PulseAudio login cookie (PipeWire doesn't use it)
+deny owner @{HOME}/.config/pulse/ rw,
+deny owner @{HOME}/.config/pulse/** rw,
+# silently block direct sound card access (everything goes through PipeWire)
+deny /dev/snd/ r,
+deny /dev/snd/** rw,
+
+
+# ===== 8. GPU (iGPU ONLY) =====
+
+# list GPU devices
+/dev/dri/ r,
+
+
+# iGPU render and display device files
+/dev/dri/renderD129 rw,
+/dev/dri/card0 rw,
+
+
+# iGPU's PCI info files only
+@{sys}/devices/pci0000:00/0000:00:08.1/0000:74:00.0/** r,
+
+
+# list PCI devices and read only their vendor/device/class ID numbers (GPU process crashes without it)
+@{sys}/bus/pci/devices/ r,
+@{sys}/devices/pci0000:00/**/vendor r,
+@{sys}/devices/pci0000:00/**/device r,
+@{sys}/devices/pci0000:00/**/class r,
+
+
+# list of installed EGL graphics drivers, needed for GPU acceleration (read-only, system-wide)
+/usr/share/glvnd/egl_vendor.d/ r,
+/usr/share/glvnd/egl_vendor.d/** r,
+
+
+# Mesa graphics driver settings
+/usr/share/drirc.d/ r,
+/usr/share/drirc.d/** r,
+
+
+# silently block Vulkan (doesn't work with Wayland in Chrome)
+deny /opt/google/chrome/libvulkan.so.1 m,
+deny /usr/share/vulkan/** r,
+
+
+# silently hide the RX 9070
+deny /dev/dri/renderD128 rw,
+deny /dev/dri/card1 rw,
+deny @{sys}/devices/pci0000:00/0000:00:01.1/0000:01:00.0/0000:02:00.0/0000:03:00.0/** r,
+
+
+# silently block the GPU name list (less for websites to fingerprint)
+deny /usr/share/libdrm/amdgpu.ids r,
+
+
+# silently block the shared Mesa shader caches (Chrome has its own)
+deny @{HOME}/.cache/mesa_shader_cache{,_db,_sf}/** rw,
+deny @{HOME}/.cache/radv_builtin_shaders/** rw,
+
+
+# ===== 9. CPU AND SYSTEM INFO =====
+
+# CPU count, top speed and core ratings
+@{sys}/devices/system/cpu/kernel_max r,
+@{sys}/devices/system/cpu/present r,
+@{sys}/devices/system/cpu/possible r,
+@{sys}/devices/system/cpu/cpufreq/policy[0-9]*/cpuinfo_max_freq r,
+@{sys}/devices/system/cpu/cpu[0-9]*/cpu_capacity r,
+
+
+# system limits on open files and file watchers
+@{PROC}/sys/fs/nr_open r,
+@{PROC}/sys/fs/inotify/max_user_watches r,
+
+
+# ===== 10. PROCESSES =====
+
+# status of your processes (Chrome checks its own)
+owner @{PROC}/[0-9]*/stat r,
+
+
+# list its own open files, to close them before starting helpers
+owner @{PROC}/[0-9]*/fd/ r,
+
+
+# tell the kernel which Chrome processes to kill first if memory runs out
+owner @{PROC}/[0-9]*/oom_score_adj rw,
+
+
+# ===== 11. SILENT DENIES =====
+
+# other programs' names and command lines
+deny @{PROC}/[0-9]*/comm r,
+deny owner @{PROC}/[0-9]*/cmdline r,
+
+
+# memory stats and memory maps of itself and its child processes
+deny owner @{PROC}/[0-9]*/task/ r,
+deny owner @{PROC}/[0-9]*/statm r,
+deny owner @{PROC}/[0-9]*/smaps_rollup r,
+deny owner @{PROC}/[0-9]*/maps r,
+deny owner @{PROC}/[0-9]*/clear_refs w,
+
+
+# listing everything in /tmp
+deny /tmp/ r,
+
+
+# listing all devices (webcam scan) and shared memory
+deny /dev/ r,
+deny /dev/shm/ r,
+
+
+# video decoder settings file (decode works without it)
+deny /etc/libva.conf r,
+
+
+# D-Bus (system and your session)
+deny /run/dbus/system_bus_socket rw,
+deny /run/user/[0-9]*/bus rw,
+
+
+# GNOME settings database, shared by every app
+deny /etc/dconf/** r,
+deny owner /run/user/[0-9]*/dconf/** rw,
+deny owner @{HOME}/.config/dconf/** rw,
+
+
+# GTK theme and icon files, shared by every app
+deny /usr/share/gtk-4.0/** r,
+deny /usr/share/icons/ r,
+deny /usr/share/icons/** r,
+deny /usr/share/pixmaps/ r,
+
+
+# listing your config folder and reading your folder-names file
+deny owner @{HOME}/.config/ r,
+deny owner @{HOME}/.config/user-dirs.dirs r,
+
+
+# certificate store shared with other programs, plus system cert folders (Chrome has its own built-in root list)
+deny owner @{HOME}/.local/share/pki/** rwk,
+deny /etc/ca-certificates/** r,
+deny /usr/share/ca-certificates/** r,
+
+
+# this machine's unique ID
+deny /etc/machine-id r,
+
+
+# hardware fingerprinting: board maker, microcode, active console
+deny @{sys}/devices/virtual/dmi/id/* r,
+deny @{sys}/devices/system/cpu/cpu[0-9]*/microcode/version r,
+deny @{sys}/devices/virtual/tty/tty0/active r,
+
+
+# default-browser check and Chrome relaunching itself through its wrapper script
+deny /usr/bin/xdg-settings x,
+deny /opt/google/chrome/google-chrome x,
+
+
+# ===== 12. CRASH REPORTER LINK =====
+# run the crash reporter in its own locked-down sub-profile
+/opt/google/chrome/chrome_crashpad_handler Cx -> google-chrome-crashpad,
+
+
+# let only the crash reporter inspect Chrome when it crashes
+ptrace (readby, tracedby) peer=google-chrome//google-chrome-crashpad,
+
+
+# local channel between Chrome and the crash reporter
+unix (send, receive) type=seqpacket peer=(label=google-chrome//google-chrome-crashpad),
+
+
+# let the crash reporter resume Chrome after inspecting it
+signal (receive) set=(cont) peer=google-chrome//google-chrome-crashpad,
+
+
+# ===== 13. CRASH REPORTER SUB-PROFILE =====
+
+profile google-chrome-crashpad {
+
+# basics every program needs
+include <abstractions/base>
+
+
+# load the crash reporter, and let it restart itself
+/opt/google/chrome/chrome_crashpad_handler mrix,
+
+
+# crash dump folder, kept on your disk
+owner "@{HOME}/.config/google-chrome/Crash Reports/" rw,
+owner "@{HOME}/.config/google-chrome/Crash Reports/**" rwk,
+
+
+# check whether the kernel allows process inspection
+@{PROC}/sys/kernel/yama/ptrace_scope r,
+
+
+# list Chrome's threads when writing a dump
+owner @{PROC}/[0-9]*/task/ r,
+
+
+# read each thread's status only
+owner @{PROC}/[0-9]*/task/[0-9]*/stat r,
+
+
+# list its own open files
+owner @{PROC}/[0-9]*/fd/ r,
+
+# list its own open files
+owner @{PROC}/[0-9]*/fd/ r,
+
+
+# inspect Chrome only, to write the dump
+ptrace (read, trace) peer=google-chrome,
+
+
+# resume Chrome after inspecting it
+signal (send) set=(cont) peer=google-chrome,
+
+
+# create the local socket for the channel to Chrome
+unix (create, getattr, getopt, setopt) type=seqpacket,
+
+
+# talk over that channel only with Chrome
+unix (send, receive) type=seqpacket peer=(label=google-chrome),
+
+
+# no internet, so dumps can't be uploaded
+deny network inet,
+deny network inet6,
+}
+
+
+# ===== 14. YOUR OWN EXTRA RULES =====
+
+include if exists <local/google-chrome>
+}
